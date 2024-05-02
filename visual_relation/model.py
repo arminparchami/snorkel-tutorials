@@ -1,7 +1,8 @@
 import csv
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, List
 
+import open_clip
 import numpy as np
 import pandas
 import torch
@@ -132,7 +133,7 @@ class WordEmb(nn.Module):
         )
 
     def _get_wordvec(self, word):
-        return self.word_embs.loc[word].as_matrix()
+        return self.word_embs.loc[word].values
 
     def forward(self, obj_category, sub_category):
         obj_emb = self._get_wordvec(obj_category)
@@ -238,3 +239,76 @@ def create_model(resnet_cnn):
         scorer=Scorer(metrics=["f1_micro"]),
     )
     return MultitaskClassifier([pred_cls_task])
+
+
+class CLIPInference:
+    """A class for CLIP model inference with methods for embedding text, preparing images, computing similarity, and converting probabilities to labels."""
+
+    def __init__(self, backbone: str = "ViT-B-32", pretrained: str = "laion2b_s34b_b79k"):
+        """
+        Initializes the CLIP model with specified backbone and pretrained weights.
+
+        :param backbone: Model architecture.
+        :param pretrained: Pretrained weight set.
+        """
+        self.model, _, self.preprocess = open_clip.create_model_and_transforms(backbone, pretrained)
+        self.tokenizer = open_clip.get_tokenizer(backbone)
+
+    def embed_text(self, actions: List[str]) -> torch.Tensor:
+        """
+        Compute text embeddings for a list of action descriptions.
+
+        :param actions: List of text descriptions.
+        :return: Normalized text feature tensor.
+        """
+        text = self.tokenizer(actions)
+        with torch.no_grad(), torch.cuda.amp.autocast():
+            text_features = self.model.encode_text(text)
+            text_features /= text_features.norm(dim=-1, keepdim=True)
+        return text_features
+
+    def prepare_image(self, image_path: str, object_corners: Tuple[int, int, int, int], subject_corners: Tuple[int, int, int, int]) -> Image:
+        """
+        Prepare an image by cropping to the specified object and subject bounding boxes and combining them into one image.
+
+        :param image_path: Path to the image file.
+        :param object_corners: Bounding box corners for the object (x_min, y_min, x_max, y_max).
+        :param subject_corners: Bounding box corners for the subject (x_min, y_min, x_max, y_max).
+        :return: Processed PIL Image object.
+        """
+        with Image.open(image_path) as img:
+            img.load()
+            processed_image = Image.new('RGB', img.size, (0, 0, 0))
+            cropped_object = img.crop(object_corners)
+            cropped_subject = img.crop(subject_corners)
+            processed_image.paste(cropped_object, object_corners[:2])
+            processed_image.paste(cropped_subject, subject_corners[:2])
+        return processed_image
+
+    def compute_similarity(self, image: Image, text_features: torch.Tensor) -> np.ndarray:
+        """
+        Compute the similarity between an image and text features using the CLIP model.
+
+        :param image: PIL Image object to be processed.
+        :param text_features: Text feature tensor.
+        :return: Probability array derived from the softmax of similarities.
+        """
+        image_tensor = self.preprocess(image).unsqueeze(0)
+        with torch.no_grad(), torch.cuda.amp.autocast():
+            image_features = self.model.encode_image(image_tensor)
+            image_features /= image_features.norm(dim=-1, keepdim=True)
+            text_probs = (100.0 * image_features @ text_features.T).softmax(dim=-1).cpu().detach().numpy()[0]
+        return text_probs
+
+    def probs_to_label(self, text_probs: np.ndarray, labels: List[int]) -> int:
+        """
+        Convert probability array to a label, based on a threshold.
+
+        :param text_probs: Array of probabilities.
+        :param labels: List of possible labels.
+        :return: The chosen label, or -1 if no label meets the threshold.
+        """
+        max_index = np.argmax(text_probs)
+        if text_probs[max_index] < 0.4:
+            return -1
+        return labels[max_index]

@@ -9,6 +9,8 @@ fi
 
 DIRS=("glove" "VRD/sg_dataset")
 
+DIRS=("glove" "VRD/sg_dataset")
+
 RELOAD=false
 # Check if at least any file is missing. If so, reload all data.
 for directory_name in "${DIRS[@]}"
@@ -19,7 +21,6 @@ do
 done
 
 ANNOTATIONS_URL="https://www.dropbox.com/s/bnfhm6kt9xumik8/vrd.zip"
-IMAGES_URL="http://imagenet.stanford.edu/internal/jcjohns/visual_relations/sg_dataset.zip"
 GLOVE_URL="http://nlp.stanford.edu/data/wordvecs/glove.6B.zip"
 
 if [ "$RELOAD" = true ]; then
@@ -30,15 +31,16 @@ if [ "$RELOAD" = true ]; then
     # download and unzip metadata and annotations
     echo "Downloading full VRD dataset..."
     wget $ANNOTATIONS_URL
-    unzip vrd.zip
+    unzip -qq vrd.zip
 
     # Delete the zip files.
     rm vrd.zip
     cd VRD
 
     # Download and unzip all images
-    wget $IMAGES_URL
-    unzip sg_dataset.zip
+    pip3 install gdown
+    python3 ../../download_images.py
+    unzip -qq sg_dataset.zip
     rm sg_dataset.zip
     cd ..
 
@@ -46,7 +48,7 @@ if [ "$RELOAD" = true ]; then
     cd glove
 
     wget $GLOVE_URL
-    unzip glove.6B.zip
+    unzip -qq glove.6B.zip
 
     # Delete the zip files
     rm  glove.6B.zip
