@@ -96,6 +96,7 @@ def lf_regex_check_out(x):
 # %% [markdown]
 # Arbitrary heuristics:
 
+
 # %%
 @labeling_function()
 def lf_short_comment(x):

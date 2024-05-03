@@ -25,9 +25,12 @@ tutorials:
   - notebook: recsys
     title: Building Recommender Systems in Snorkel
     description: Labeling text reviews for book recommendations
-  - notebook: visual_relation
+  - notebook: visual_relation/visual_relation_tutorial.ipynb
     title: Visual Relation Detection in Snorkel
     description: Multi-class labeling for visual relationships in images
+  - notebook: visual_relation/visual_relation_with_clip_tutorial.ipynb
+    title: Visual Relation Detection in Snorkel Using Model-Based LFs
+    description: Multi-class labeling for visual relationships in images using CLIP
   - notebook: spouse
     title: Information Extraction in Snorkel
     description: Labeling spouse mentions in documents

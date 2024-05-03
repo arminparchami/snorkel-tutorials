@@ -10,9 +10,11 @@ import pandas as pd
 IS_TEST = os.environ.get("TRAVIS") == "true" or os.environ.get("IS_TEST") == "true"
 
 
-def load_data() -> Tuple[
-    Tuple[pd.DataFrame, np.ndarray], pd.DataFrame, Tuple[pd.DataFrame, np.ndarray]
-]:
+def load_data() -> (
+    Tuple[
+        Tuple[pd.DataFrame, np.ndarray], pd.DataFrame, Tuple[pd.DataFrame, np.ndarray]
+    ]
+):
     """
     Returns:
         df_dev, Y_dev: Development set data points and 1D labels ndarray.

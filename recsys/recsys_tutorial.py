@@ -268,6 +268,7 @@ def get_model(embed_dim=64, hidden_layer_sizes=[32]):
 # %% [markdown]
 # We use triples of (`book_idxs`, `book_idx`, `rating`) from our dataframes as training data points. In addition, we want to train the model to recognize when a user will not read a book. To create data points for that, we randomly sample a `book_id` not in `book_idxs` and use that with a `rating` of 0 as a _random negative_ data point. We create one such _random negative_ data point for every positive (`rating` 1) data point in our dataframe so that positive and negative data points are roughly balanced.
 
+
 # %%
 # Generator to turn dataframe into data points.
 def get_data_points_generator(df):

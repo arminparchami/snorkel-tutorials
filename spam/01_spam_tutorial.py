@@ -391,6 +391,7 @@ def textblob_sentiment(x):
 # %% [markdown]
 # We can now pick a reasonable threshold and write a corresponding labeling function (note that it doesn't have to be perfect as the `LabelModel` will soon help us estimate each labeling function's accuracy and reweight their outputs accordingly):
 
+
 # %%
 @labeling_function(pre=[textblob_sentiment])
 def textblob_polarity(x):
@@ -400,6 +401,7 @@ def textblob_polarity(x):
 # %% [markdown]
 # Let's do the same for the subjectivity scores.
 # This will run faster than the last cell, since we memoized the `Preprocessor` outputs.
+
 
 # %%
 @labeling_function(pre=[textblob_sentiment])
@@ -490,6 +492,7 @@ keyword_song = make_keyword_lf(keywords=["song"], label=HAM)
 # %% [markdown]
 # There may other heuristics or "rules of thumb" that you come up with as you look at the data.
 # So long as you can express it in a function, it's a viable LF!
+
 
 # %%
 @labeling_function()

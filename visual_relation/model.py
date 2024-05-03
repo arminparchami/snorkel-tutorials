@@ -244,14 +244,18 @@ def create_model(resnet_cnn):
 class CLIPInference:
     """A class for CLIP model inference with methods for embedding text, preparing images, computing similarity, and converting probabilities to labels."""
 
-    def __init__(self, backbone: str = "ViT-B-32", pretrained: str = "laion2b_s34b_b79k"):
+    def __init__(
+        self, backbone: str = "ViT-B-32", pretrained: str = "laion2b_s34b_b79k"
+    ):
         """
         Initializes the CLIP model with specified backbone and pretrained weights.
 
         :param backbone: Model architecture.
         :param pretrained: Pretrained weight set.
         """
-        self.model, _, self.preprocess = open_clip.create_model_and_transforms(backbone, pretrained)
+        self.model, _, self.preprocess = open_clip.create_model_and_transforms(
+            backbone, pretrained
+        )
         self.tokenizer = open_clip.get_tokenizer(backbone)
 
     def embed_text(self, actions: List[str]) -> torch.Tensor:
@@ -267,7 +271,12 @@ class CLIPInference:
             text_features /= text_features.norm(dim=-1, keepdim=True)
         return text_features
 
-    def prepare_image(self, image_path: str, object_corners: Tuple[int, int, int, int], subject_corners: Tuple[int, int, int, int]) -> Image:
+    def prepare_image(
+        self,
+        image_path: str,
+        object_corners: Tuple[int, int, int, int],
+        subject_corners: Tuple[int, int, int, int],
+    ) -> Image:
         """
         Prepare an image by cropping to the specified object and subject bounding boxes and combining them into one image.
 
@@ -278,14 +287,16 @@ class CLIPInference:
         """
         with Image.open(image_path) as img:
             img.load()
-            processed_image = Image.new('RGB', img.size, (0, 0, 0))
+            processed_image = Image.new("RGB", img.size, (0, 0, 0))
             cropped_object = img.crop(object_corners)
             cropped_subject = img.crop(subject_corners)
             processed_image.paste(cropped_object, object_corners[:2])
             processed_image.paste(cropped_subject, subject_corners[:2])
         return processed_image
 
-    def compute_similarity(self, image: Image, text_features: torch.Tensor) -> np.ndarray:
+    def compute_similarity(
+        self, image: Image, text_features: torch.Tensor
+    ) -> np.ndarray:
         """
         Compute the similarity between an image and text features using the CLIP model.
 
@@ -297,7 +308,13 @@ class CLIPInference:
         with torch.no_grad(), torch.cuda.amp.autocast():
             image_features = self.model.encode_image(image_tensor)
             image_features /= image_features.norm(dim=-1, keepdim=True)
-            text_probs = (100.0 * image_features @ text_features.T).softmax(dim=-1).cpu().detach().numpy()[0]
+            text_probs = (
+                (100.0 * image_features @ text_features.T)
+                .softmax(dim=-1)
+                .cpu()
+                .detach()
+                .numpy()[0]
+            )
         return text_probs
 
     def probs_to_label(self, text_probs: np.ndarray, labels: List[int]) -> int:

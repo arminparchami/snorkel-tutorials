@@ -30,11 +30,13 @@ if os.path.basename(os.getcwd()) == "snorkel-tutorials":
 #
 # The sampled version of the dataset **uses the same 26 data points across the train, dev, and test sets.
 # This setting is meant to demonstrate quickly how Snorkel works with this task, not to demonstrate performance.**
+#
+# The full version of the dataset **uses the same 635 samples for train, 216 samples for dev, and 194 samples for test sets and is still relatively small.**
 
 # %%
 from utils import load_vrd_data
 
-# setting sample=False will take ~3 hours to run (downloads full VRD dataset)
+# setting sample=False will take ~30 minutes to run (downloads full VRD dataset). make sure the data folder is empty before running
 sample = False
 is_test = os.environ.get("TRAVIS") == "true" or os.environ.get("IS_TEST") == "true"
 df_train, df_valid, df_test = load_vrd_data(sample, is_test)
@@ -49,98 +51,102 @@ print("Test Relationships: ", len(df_test))
 # %% [markdown]
 # ## 2. Writing Labeling Functions
 # We now write labeling functions to detect what relationship exists between pairs of bounding boxes. To do so, we can encode various intuitions into the labeling functions:
-# * _Categorical_ intution: knowledge about the categories of subjects and objects usually involved in these relationships (e.g., `person` is usually the subject for predicates like `ride` and `carry`)
-# * _Spatial_ intuition: knowledge about the relative positions of the subject and objects (e.g., subject is usually higher than the object for the predicate `ride`)
+#
+# Here, we use [CLIP](https://arxiv.org/abs/2103.00020) model to provide context about the action happening in the image. We first crop the the bounding boxes of the object and subject from the image. We then copy them into a blank image to help the CLIP backbone focus only on the desired pair of subject and object. The similarity between text embedings of actions and embedding of the image provides a good proxy to label the sample.
 
 # %%
+# Define some Constants
+
 RIDE = 0
 CARRY = 1
 OTHER = 2
 ABSTAIN = -1
 
-# %% [markdown]
-# We begin with labeling functions that encode categorical intuition: we use knowledge about common subject-object category pairs that are common for `RIDE` and `CARRY` and also knowledge about what subjects or objects are unlikely to be involved in the two relationships.
-
-# %%
-from snorkel.labeling import labeling_function
-
-# Category-based LFs
-@labeling_function()
-def lf_ride_object(x):
-    if x.subject_category == "person":
-        if x.object_category in [
-            "bike",
-            "snowboard",
-            "motorcycle",
-            "horse",
-            "bus",
-            "truck",
-            "elephant",
-        ]:
-            return RIDE
-    return ABSTAIN
-
-
-@labeling_function()
-def lf_carry_object(x):
-    if x.subject_category == "person":
-        if x.object_category in ["bag", "surfboard", "skis"]:
-            return CARRY
-    return ABSTAIN
-
-
-@labeling_function()
-def lf_carry_subject(x):
-    if x.object_category == "person":
-        if x.subject_category in ["chair", "bike", "snowboard", "motorcycle", "horse"]:
-            return CARRY
-    return ABSTAIN
-
-
-@labeling_function()
-def lf_not_person(x):
-    if x.subject_category != "person":
-        return OTHER
-    return ABSTAIN
-
-
-# %% [markdown]
-# We now encode our spatial intuition, which includes measuring the distance between the bounding boxes and comparing their relative areas.
-
-# %%
 YMIN = 0
 YMAX = 1
 XMIN = 2
 XMAX = 3
 
+DIR = "data/VRD/sg_dataset/samples" if sample else "data/VRD/sg_dataset/sg_train_images"
+
+# %% [markdown]
+# We can use CLIP to provide context about the action happening in the image. We first crop the the bounding boxes of the object and subject from the image. We then copy them into a blank image to help the CLIP backbone focus only on the desired pair of subject and object. The similarity between text embedings of actions and embedding of the image provides a good proxy to label the sample.
+
 # %%
-import numpy as np
+from snorkel.labeling import labeling_function
+from model import CLIPInference
+import pandas as pd
+from typing import List, Union
 
-# Distance-based LFs
-@labeling_function()
-def lf_ydist(x):
-    if x.subject_bbox[XMAX] < x.object_bbox[XMAX]:
+clip_model = CLIPInference()
+
+def process_sample(x: pd.Series, actions: List[str], labels: List[int]) -> int:
+    """Process a sample to determine its label based on visual and textual features."""
+    if x.object_category != "person" and x.subject_category != "person":
         return OTHER
-    return ABSTAIN
+
+    # Extract and prepare bounding box coordinates
+    object_corners = (x.object_bbox[XMIN], x.object_bbox[YMIN], x.object_bbox[XMAX], x.object_bbox[YMAX])
+    subject_corners = (x.subject_bbox[XMIN], x.subject_bbox[YMIN], x.subject_bbox[XMAX], x.subject_bbox[YMAX])
+
+    # Embedding text and preparing the image for model inference
+    text_features = clip_model.embed_text(actions)
+    processed_image = clip_model.prepare_image(f"{DIR}/{x.source_img}", object_corners, subject_corners)
+    text_probs = clip_model.compute_similarity(processed_image, text_features)
+
+    return clip_model.probs_to_label(text_probs, labels)
 
 
 @labeling_function()
-def lf_dist(x):
-    if np.linalg.norm(np.array(x.subject_bbox) - np.array(x.object_bbox)) <= 1000:
-        return OTHER
-    return ABSTAIN
+def lf_clip_carry(x: pd.Series) -> int:
+    """Labeling function for determining if a person is carrying an object."""
+    actions = ["The person is carrying a small object in their hand", "The person is sitting", "The person is sleeping"]
+    labels = [CARRY, OTHER, OTHER]
+    return process_sample(x, actions, labels)
 
-
-def area(bbox):
-    return (bbox[YMAX] - bbox[YMIN]) * (bbox[XMAX] - bbox[XMIN])
-
-
-# Size-based LF
 @labeling_function()
-def lf_area(x):
-    if area(x.subject_bbox) / area(x.object_bbox) <= 0.5:
-        return OTHER
-    return ABSTAIN
+def lf_clip_ride(x: pd.Series) -> int:
+    """Labeling function for determining if a person is riding an object."""
+    object_category = x.object_category if x.object_category != "person" else x.subject_category
+    riding_objects = ["car", "train", "motorcycle", "bike", "boat", "van", "plane", "airplane", "skateboard", "horse", "skis", "surfboard", "snowboard"]
+    if object_category not in riding_objects:
+        return ABSTAIN
+    actions = [f"A person {verb} a {object_category}" for verb in ["driving a vehicle", "sitting inside", "riding on", "steering", "flying", "walking", "pushing"]]
+    labels = [RIDE if verb != "walking" else OTHER for verb in actions[:-2]] + [OTHER, CARRY, OTHER]
+    return process_sample(x, actions, labels)
+
+@labeling_function()
+def lf_clip_wearing(x: pd.Series) -> int:
+    """Labeling function for determining if a person is wearing an object."""
+    object_category = x.object_category if x.object_category != "person" else x.subject_category
+    wearing_objects = ["shirt", "glasses", "hat", "pants", "jacket", "shoe", "shoes", "helmet", "coat", "shorts", "jeans", "sunglasses", "tie", "watch"]
+    if object_category not in wearing_objects:
+        return ABSTAIN
+    actions = [f"A person is {verb} the {object_category}" for verb in ["wearing", "carrying", "throwing"]]
+    labels = [OTHER, CARRY, OTHER]
+    return process_sample(x, actions, labels)
+
+@labeling_function()
+def lf_clip_sitting(x: pd.Series) -> int:
+    """Labeling function for determining if a person is sitting on an object."""
+    object_category = x.object_category if x.object_category != "person" else x.subject_category
+    sitting_on_objects = ["chair", "bench", "sofa", "train", "tree"]
+    if object_category not in sitting_on_objects:
+        return ABSTAIN
+    actions = [f"A person sitting on a {object_category}", f"A person carrying a {object_category}", f"A person pointing at a {object_category}"]
+    labels = [OTHER, CARRY, OTHER]
+    return process_sample(x, actions, labels)
+
+@labeling_function()
+def lf_clip_riding_bike(x: pd.Series) -> int:
+    """Labeling function for determining if a person is riding a bike or motorcycle."""
+    object_category = x.object_category if x.object_category != "person" else x.subject_category
+    riding_objects = ["bike", "motorcycle"]
+    if object_category not in riding_objects:
+        return ABSTAIN
+    actions = [f"A person riding the {object_category}", f"The {object_category} is parked"]
+    labels = [RIDE, OTHER]
+    return process_sample(x, actions, labels)
 
 
 # %% [markdown]
@@ -150,13 +156,11 @@ def lf_area(x):
 from snorkel.labeling import PandasLFApplier
 
 lfs = [
-    lf_ride_object,
-    lf_carry_object,
-    lf_carry_subject,
-    lf_not_person,
-    lf_ydist,
-    lf_dist,
-    lf_area,
+    lf_clip_carry,
+    lf_clip_ride,
+    lf_clip_wearing,
+    lf_clip_sitting,
+    lf_clip_riding_bike,
 ]
 
 applier = PandasLFApplier(lfs)
@@ -168,6 +172,10 @@ from snorkel.labeling import LFAnalysis
 
 Y_valid = df_valid.label.values
 LFAnalysis(L_valid, lfs).lf_summary(Y_valid)
+
+# %%
+Y_train = df_train.label.values
+LFAnalysis(L_train, lfs).lf_summary(Y_train)
 
 # %% [markdown]
 # ## 3. Train Label Model
@@ -235,7 +243,7 @@ model = create_model(cnn)
 from snorkel.classification import Trainer
 
 trainer = Trainer(
-    seed=123,
+    seed = 123,
     n_epochs=1,  # increase for improved performance
     lr=1e-3,
     checkpointing=False,
@@ -247,6 +255,6 @@ model.score([dl_valid])
 
 # %% [markdown]
 # ## Recap
-# We have successfully trained a visual relationship detection model! Using categorical and spatial intuition about how objects in a visual relationship interact with each other, we are able to assign high quality training labels to object pairs in the VRD dataset in a multi-class classification setting.
+# We have successfully trained a visual relationship detection model! The addition of a model-based LF helped improve the accuracy of labling and consequently the accuracy of the trained model improved.
 #
-# For more on how Snorkel can be used for visual relationship tasks, please see our [ICCV 2019 paper](https://arxiv.org/abs/1904.11622)!
+# We recently leveraged image-based and model-based LFs to [accelerate product tagging for Wayfair](https://snorkel.ai/how-wayfair-accelerated-product-tagging-automation-with-snorkel-flow/) using Snorkel Flow platform. You can read more on how Wayfair is using our technology in [this blog post](https://www.aboutwayfair.com/careers/tech-blog/accelerating-catalog-tagging-automation-with-snorkels-data-centric-ai-platform-wayfairs-success-story)!
